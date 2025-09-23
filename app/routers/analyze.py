@@ -1,19 +1,44 @@
-from fastapi import APIRouter, UploadFile, File
-import shutil
-import tempfile
-from app.services.model_service import analyze_image
-from app.models.report import Report
+from fastapi import APIRouter, File, UploadFile, HTTPException, status
+from pydantic import BaseModel
+from typing import List, Dict
+from app.services.model_service import simple_image_analyze
+from app.services.food_analyzer_adapter import analyze_image_bytes_to_report
 
 router = APIRouter()
 
-@router.post("/analyze", response_model=Report)
+# 기존 간단 분석 응답
+class AnalyzeResponse(BaseModel):
+    menu: str
+    waste_ratio: float
+    suggestion: str
+
+@router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(file: UploadFile = File(...)):
-    # 업로드된 파일 임시 저장
-    temp_file = tempfile.NamedTemporaryFile(delete=False)
-    with open(temp_file.name, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="빈 파일")
+        menu, waste, sug = simple_image_analyze(content)
+        return AnalyzeResponse(menu=menu, waste_ratio=waste, suggestion=sug)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analyze failed: {e}") from e
 
-    # 분석 로직 실행 (현재는 더미 결과)
-    result = analyze_image(temp_file.name)
+# 그래프 기반 심화 분석 응답
+class GraphAnalyzeResponse(BaseModel):
+    report: str
+    improvements: List[Dict[str, str]]
 
-    return result
+@router.post("/analyze/graph", response_model=GraphAnalyzeResponse)
+async def analyze_graph(file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="빈 파일")
+        result = analyze_image_bytes_to_report(content)
+        return GraphAnalyzeResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AnalyzeGraph failed: {e}") from e
