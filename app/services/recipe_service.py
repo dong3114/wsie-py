@@ -2,12 +2,10 @@ import pandas as pd
 from dotenv import load_dotenv
 import os
 
-from langchain.docstore.document import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.prompts import PromptTemplate
-from langchain.chains import RetrievalQAWithSourcesChain
 
 # Retriever를 담을 전역 변수 (메모리에 한 번만 로드하기 위함)
 RETRIEVER = None
@@ -122,14 +120,16 @@ def create_vector_store(documents: list[Document]):
         print(f"{i + len(batch)}/{len(chunks)} 처리 완료...")
 
     print("✅ 벡터 DB 생성 완료!")
-    return vec_db.as_retriever()
+    return vec_db
 
 
 # -----------------------------------------------------
 # 3. Retriever 초기화 함수
 # -----------------------------------------------------
+FAISS_INDEX_PATH = "./data/faiss_index"
+
+
 def initialize_retriever():
-    """데이터를 로드하고 Retriever를 생성하여 전역 변수에 저장합니다."""
     global RETRIEVER
     if RETRIEVER is None:
         print("Retriever 초기화를 시작합니다...")
@@ -138,10 +138,27 @@ def initialize_retriever():
             raise ValueError(
                 "OPENAI_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요."
             )
+        embeddings = OpenAIEmbeddings()
 
-        documents = load_and_process_data("./data/recipes_all.csv")
-        RETRIEVER = create_vector_store(documents)
-        print("✅ Retriever 초기화 완료!")
+        if os.path.exists(FAISS_INDEX_PATH):
+            print("저장된 벡터 DB를 불러옵니다...")
+            vec_db = FAISS.load_local(
+                FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True
+            )
+            RETRIEVER = vec_db.as_retriever()
+
+        else:
+            print(f"새로운 벡터DB를 생성하고 저장합니다...")
+            documents = load_and_process_data("./data/recipes_all.csv")
+
+            vec_db = create_vector_store(documents)
+
+            vec_db.save_local(FAISS_INDEX_PATH)
+            print(f"'{FAISS_INDEX_PATH}'에 벡터 DB를 저장했습니다.")
+
+            RETRIEVER = vec_db.as_retriever()
+
+        print(" Retriever 초기화 완료!")
 
 
 # -----------------------------------------------------
